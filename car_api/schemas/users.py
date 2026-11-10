@@ -1,5 +1,4 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
 
 
 class UserSchema(BaseModel):
@@ -15,10 +14,12 @@ class UserPublicSchema(BaseModel):
 
 
 class UserUpdateSchema(BaseModel):
-    username: Optional[str] = None
-    email: Optional[EmailStr] = None
-    password: Optional[str] = None
+    username: str | None = None
+    email: EmailStr | None = None
+    password: str | None = None
 
 
 class UserListPublicSchema(BaseModel):
-    users: List[UserPublicSchema]
+    users: list[UserPublicSchema]
+    offset: int
+    limit: int

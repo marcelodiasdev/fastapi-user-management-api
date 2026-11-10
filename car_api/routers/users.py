@@ -1,57 +1,109 @@
-from fastapi import APIRouter, status, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, exists
 
-from car_api.models import User
 from car_api.core.database import get_session
 from car_api.core.security import get_password_hash
 from car_api.db import USERS
-from car_api.schemas.users import (
-    UserListPublicSchema,
-    UserSchema,
-    UserPublicSchema
-)
+from car_api.models import User
+from car_api.schemas.users import UserListPublicSchema, UserPublicSchema, UserSchema
 
 router = APIRouter()
 
 
-@router.post(path='/', status_code=status.HTTP_201_CREATED, response_model=UserPublicSchema,
-             summary='Criar novo usuário')
+@router.post(
+    path="/",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UserPublicSchema,
+    summary="Criar novo usuário",
+)
 async def creater_user(user: UserSchema, db: AsyncSession = Depends(get_session)):
-    username_exists = await db.scalar(select(exists().where(User.username == user.username)))
+    username_exists = await db.scalar(
+        select(exists().where(User.username == user.username))
+    )
     email_exists = await db.scalar(select(exists().where(User.email == user.email)))
 
     if username_exists:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='username já está em uso')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="username já está em uso"
+        )
 
     if email_exists:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='email já cadastrado')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="email já cadastrado"
+        )
 
-    db_user = User(username=user.username, email=user.email, password=get_password_hash(user.password))
+    db_user = User(
+        username=user.username,
+        email=user.email,
+        password=get_password_hash(user.password),
+    )
     db.add(db_user)
 
-
     await db.commit()
-
 
     await db.refresh(db_user)
 
     return db_user
 
 
-@router.get(path='/', status_code=status.HTTP_200_OK, response_model=UserListPublicSchema)
-async def list_user():
-    return {'users': USERS}
+@router.get(
+    path="/",
+    status_code=status.HTTP_200_OK,
+    response_model=UserListPublicSchema,
+    summary="Listar Usuários",
+)
+async def list_user(
+    offset: int = Query(0, ge=0, description="Número de registros para pular"),
+    limit: int = Query(100, ge=1, le=100, description="Limite de registros"),
+    db: AsyncSession = Depends(get_session),
+):
+    query = select(User).offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    users = result.scalars().all()
+
+    return {"users": users, "offset": offset, "limit": limit}
 
 
-@router.put(path='/{user_id}', status_code=status.HTTP_201_CREATED, response_model=UserPublicSchema)
+@router.get(
+    path="/{user_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=UserPublicSchema,
+    summary="Buscar usuário por id",
+)
+async def get_user(user_id: int, db: AsyncSession = Depends(get_session)):
+    user = await db.get(User, user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado"
+        )
+
+    return user
+
+
+@router.put(
+    path="/{user_id}",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UserPublicSchema,
+)
 async def update_user(user_id: int, user: UserSchema):
     user_with_id = UserPublicSchema(**user.model_dump(), id=user_id)
     USERS[user_id - 1] = user_with_id
     return user_with_id
 
 
-@router.delete(path='/{user_id}', status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(user_id: int):
-    del USERS[user_id - 1]
-    return
+@router.delete(
+    path="/{user_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Deletar usuário"
+)
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_session)):
+    user = await db.get(User, user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado"
+        )
+
+    await db.delete(user)
+    await db.commit()
